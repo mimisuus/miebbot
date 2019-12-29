@@ -2,6 +2,8 @@ const tmi = require('tmi.js');
 const xml = require('xmlhttprequest')
 const commands = ['!dice', '!commands', '!uptime', '!timestamp', '!song', '!poll', '!title', '!game', '!feed'];
 let userInfo;
+let botInfo;
+let oauth;
 
 const opts = {
     options: { debug: true},
@@ -11,7 +13,8 @@ const opts = {
     },
     identity: {
         username: 'miebbot',
-        password: 'oauth:horrol26wxispc0fr38qlv8ep3whwr'
+        password: 'oauth:horrol26wxispc0fr38qlv8ep3whwr',
+        client_id: 'bvn0807xr52adl1kect8l1bh2paxl6'
     },
     channels: [ 'miekki' ]
 };
@@ -42,17 +45,23 @@ function onMessageHandler(target, context, msg, self) {
         case '!timestamp': // for finding highlights with ease after the stream is over
             const timestamp = msToTimestamp(getUptime());
             client.say(target, `Timestamp saved at ${timestamp}`)
-            log(`Timestamp at ${timestamp}`);
+            readwrite(`Timestamp at ${timestamp}`);
             break;
-        // MAKE THE FOLLOWING 3 FOR MODERATORS ONLY
+        // Following 3 only for broadcaster
         case '!title':
-            updateChannel('status', msg.substring(command[0].length , msg.length - 1))
+            if (context.badges.broadcaster == 1) {
+                updateChannel('status', msg.substring(command[0].length + 1, msg.length));
+            }
             break;
         case '!game':
-            updateChannel('game', msg.substring(command[0].length , msg.length - 1))
+            if (context.badges.broadcaster == 1) {
+                updateChannel('game', msg.substring(command[0].length + 1 , msg.length));
+            }
             break;
         case '!feed':   // turn feed off or on
-            updateChannel('channel_feed_enabled', command[1]);
+            if (context.badges.broadcaster == 1) {
+                updateChannel('channel_feed_enabled', command[1]);
+            }
             break;
         case '!poll':
             command.shift(); 
@@ -71,18 +80,28 @@ function onMessageHandler(target, context, msg, self) {
 }
 
 function updateChannel(property, value) {
-    const url = 'https://api.twitch.tv/kraken/channels/' + userInfo.id; 
-    const headers = [`Authorization: Bearer ${opts.identity.password}`, 'Content-Type' ,'application/json'];
+    const url = `https://api.twitch.tv/v5/channels/${userInfo._id}`;
+    const headers = ['Client-ID',opts.identity.client_id, 'Accept', 'application/vnd.twitchtv.v5+json',
+                    'Authorization', `OAuth ${oauth}`, 'Content-Type', 'application/json;charset=utf-8'];
     const jsonString = `{"channel": {"${property}": "${value}"}}`;
-    useApi('PUT', url, true, headers, jsonString);
+    useApi('PUT', url, false, headers, jsonString);
 }
 
-function log(message) {
+function readwrite(message = null) {
     const fs = require('fs');
-    fs.appendFile('logs.txt', message + "\n", function(err){
-        if (err) throw err;
-        console.log('* Logs updated');
-    });
+    if (message != null) {
+        fs.appendFile('logs.txt', message + "\n", function(err){
+            if (err) throw err;
+            console.log('* Logs updated');
+        });
+        // only used for getting authorization token
+    } else { 
+        fs.readFile('oauth.txt', 'utf8', function (err, data) {
+            if (err) throw err;
+            // ignore EOF char
+            oauth = data.substr(0, data.length-1);
+        });
+    }
 }
 
 function msToTimestamp(milliseconds) {
@@ -97,7 +116,7 @@ function executedCommand(command) {
         console.log(`* Executed command ${command}`);
         return command;
     } 
-    else if (command.charAt(0) == '!') log(`* Tried to execute unknow command ${command}`); // possibly wanted commands
+    else if (command.charAt(0) == '!') readwrite(`* Tried to execute unknow command ${command}`); // possibly wanted commands
 }
 
 function rollDice() {
@@ -110,12 +129,7 @@ function getUptime() {
 }
 
 function makePoll(title, choices, multi) {
-    let jsonString = 
-    `{"title": "${title}",` +               // "title": "X",
-    `"options": [`+                         // "options": [
-    '"' + choices.join('", "') + '"' +   //      "Option #1", "Option #2", "Option #3"...
-    `],`+                                   // ],
-    `"multi": ${multi}}`;                   // "multi": true/false
+    let jsonString = JSON.stringify({ 'title': title, 'options': choices , 'multi': multi});
 
     headers = ['Content-Type' ,'application/json'];
     pollData = useApi('PUT', 'https://strawpoll.me/api/v2/polls', true, headers, jsonString);
@@ -124,9 +138,8 @@ function makePoll(title, choices, multi) {
 
 function useApi(method, url, async = false, additionalHeaders = [], jsonItem = null) {
     let xmlHttp = new xml.XMLHttpRequest();
-    xmlHttp.open( method, url, async);
-    // never used with PUT
-    if (method == 'GET') xmlHttp.setRequestHeader('Client-ID','bvn0807xr52adl1kect8l1bh2paxl6');
+    xmlHttp.open(method, url, async);
+    xmlHttp.setRequestHeader('Client-ID',opts.identity.client_id);
     for (let i = 0; i < additionalHeaders.length; i += 2) {
         xmlHttp.setRequestHeader(additionalHeaders[i], additionalHeaders[i + 1]);
     }
@@ -136,7 +149,10 @@ function useApi(method, url, async = false, additionalHeaders = [], jsonItem = n
 
 function onConnectedHandler(addr, port) {
     console.log(`* Connected to ${addr}:${port}`);
-    const url = 'https://api.twitch.tv/helix/streams?user_login=miekki';
-    const userJSON = JSON.parse(useApi('GET', url));
-    userInfo = userJSON.data[0];
+    let url = 'https://api.twitch.tv/kraken/users?login=miekki';
+    const params = ['Accept', `application/vnd.twitchtv.v5+json`];
+    userJsonString = JSON.parse(useApi('GET', url, false, params));
+    userInfo = userJsonString.users[0];
+    oauth = readwrite();
+    client.color("Blue");
 }
