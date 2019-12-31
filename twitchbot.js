@@ -1,9 +1,8 @@
 const tmi = require('tmi.js');
-const xml = require('xmlhttprequest')
-const commands = ['!dice', '!commands', '!uptime', '!timestamp', '!song', '!poll', '!title', '!game', '!feed'];
-let userInfo;
-let botInfo;
-let oauth;
+const xml = require('xmlhttprequest');
+const commands = ['!dice', '!commands', '!uptime', '!timestamp', '!poll', '!song'];
+const broadcasterCommands = [ '!title', '!game', '!feed'];
+let userInfo, botInfo, oauth, song;
 
 const opts = {
     options: { debug: true},
@@ -30,7 +29,7 @@ function onMessageHandler(target, context, msg, self) {
     if (self) { return; } // ignore all messages from the bot itself
 
     let command = msg.split(' ');
-    switch(executedCommand(command[0])) {
+    switch(executedCommand(command[0], context)) {
         case '!dice':
             const num = rollDice();
             client.say(target, `You rolled a ${num}`);
@@ -47,21 +46,15 @@ function onMessageHandler(target, context, msg, self) {
             client.say(target, `Timestamp saved at ${timestamp}`)
             readwrite(`Timestamp at ${timestamp}`);
             break;
-        // Following 3 only for broadcaster
+        // Following 3 are only for broadcaster
         case '!title':
-            if (context.badges.broadcaster == 1) {
-                updateChannel('status', msg.substring(command[0].length + 1, msg.length));
-            }
+            updateChannel('status', msg.substring(command[0].length + 1, msg.length));
             break;
         case '!game':
-            if (context.badges.broadcaster == 1) {
                 updateChannel('game', msg.substring(command[0].length + 1 , msg.length));
-            }
             break;
         case '!feed':   // turn feed off or on
-            if (context.badges.broadcaster == 1) {
                 updateChannel('channel_feed_enabled', command[1]);
-            }
             break;
         case '!poll':
             command.shift(); 
@@ -75,8 +68,17 @@ function onMessageHandler(target, context, msg, self) {
             client.say(target, makePoll(title, command, multi));
             break;
         case '!song':
+            getSong();
+            readwrite(null, 'song.txt');
+            client.say(target, `Currently playing: ${song}`);
             break;
     }
+}
+
+function getSong() {
+    const execSync = require('child_process').execSync;
+    // get current song from cmus with bash script calling cmus-remote
+    const exec = execSync('sh currentsong.sh');
 }
 
 function updateChannel(property, value) {
@@ -87,20 +89,22 @@ function updateChannel(property, value) {
     useApi('PUT', url, false, headers, jsonString);
 }
 
-function readwrite(message = null) {
+function readwrite(message, file = null) {
     const fs = require('fs');
     if (message != null) {
         fs.appendFile('logs.txt', message + "\n", function(err){
             if (err) throw err;
             console.log('* Logs updated');
         });
-        // only used for getting authorization token
-    } else { 
-        fs.readFile('oauth.txt', 'utf8', function (err, data) {
-            if (err) throw err;
-            // ignore EOF char
-            oauth = data.substr(0, data.length-1);
-        });
+    } else {
+        var data = fs.readFileSync(file,{ encoding: 'utf8'});
+        if (file == 'oauth.txt') {
+            // set ouath and ignore EOF char                // couldn't get variable assigning
+            oauth = data.substring(0, data.length - 1);     // to work outside this scope 
+        } else if (file == 'song.txt'){                     // even with callbacks
+            // ignore filepath start
+            song = data.substring(`file /home/miekki/music/`.length, data.length - 1);
+        }
     }
 }
 
@@ -111,11 +115,14 @@ function msToTimestamp(milliseconds) {
     return `${uptimeHours}h${uptimeMinutes}m${uptimeSeconds}s`
 }
 
-function executedCommand(command) {
+function executedCommand(command, context) {
     if (commands.includes(command)) {
         console.log(`* Executed command ${command}`);
         return command;
-    } 
+    } else if (broadcasterCommands.includes(command) && context.badges.broadcaster == 1) {
+        console.log(`* Executed broadcaster-only command ${command}`);
+        return command;
+    }
     else if (command.charAt(0) == '!') readwrite(`* Tried to execute unknow command ${command}`); // possibly wanted commands
 }
 
@@ -153,6 +160,7 @@ function onConnectedHandler(addr, port) {
     const params = ['Accept', `application/vnd.twitchtv.v5+json`];
     userJsonString = JSON.parse(useApi('GET', url, false, params));
     userInfo = userJsonString.users[0];
-    oauth = readwrite();
+    // get oauth from file
+    readwrite(null, 'oauth.txt');
     client.color("Blue");
 }
