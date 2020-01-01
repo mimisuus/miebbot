@@ -1,8 +1,9 @@
 const tmi = require('tmi.js');
 const xml = require('xmlhttprequest');
-const commands = ['!dice', '!commands', '!uptime', '!timestamp', '!poll', '!song'];
+const commands = ['!random', '!commands', '!uptime', '!timestamp', '!song'];
 const broadcasterCommands = [ '!title', '!game', '!feed'];
-let userInfo, botInfo, oauth, song;
+const modCommnads = ['!poll'];
+let userInfo, botInfo, oauth;
 
 const opts = {
     options: { debug: true},
@@ -29,10 +30,15 @@ function onMessageHandler(target, context, msg, self) {
     if (self) { return; } // ignore all messages from the bot itself
 
     let command = msg.split(' ');
-    switch(executedCommand(command[0], context)) {
-        case '!dice':
-            const num = rollDice();
-            client.say(target, `You rolled a ${num}`);
+    switch (executedCommand(command[0], context)) {
+        case '!random':
+            const range = command[1];
+            if (range == null) {
+                client.say(target, 'Please specify an upper limit for the random number');
+            } else {
+                const num = random(range);
+                client.say(target, `Result: ${num}`);
+            }
             break;
         case '!commands':
             commandsStr = commands.join(', ');
@@ -46,30 +52,46 @@ function onMessageHandler(target, context, msg, self) {
             client.say(target, `Timestamp saved at ${timestamp}`)
             readwrite(`Timestamp at ${timestamp}`);
             break;
-        // Following 3 are only for broadcaster
+        // Following 4 are only for broadcaster
         case '!title':
             updateChannel('status', msg.substring(command[0].length + 1, msg.length));
             break;
         case '!game':
-                updateChannel('game', msg.substring(command[0].length + 1 , msg.length));
+            let gameName = msg.substring(command[0].length + 1 , msg.length);
+            // get rid of the need to properly format game name for users most streamed games
+            switch (gameName) {
+                case 'isaac':
+                    gameName = 'The Binding of Isaac: Afterbirth';
+                    break;
+                case 'csgo':
+                    gameName = 'Counter-Strike: Global Offensive';
+                    break;
+            }
+            updateChannel('game', gameName);
             break;
         case '!feed':   // turn feed off or on
-                updateChannel('channel_feed_enabled', command[1]);
+            updateChannel('channel_feed_enabled', command[1]);
             break;
         case '!poll':
             command.shift(); 
             const title = command[0];
             let multi = false;
-            if(command[1] == 'multi') {
+            if (command[1] == 'multi') {
                 multi = true;
                 command.shift();
             }
             command.shift(); // now the rest of the array is the wanted choises
-            client.say(target, makePoll(title, command, multi));
+            if (command.lenght < 2) {
+                client.say(target, `provide a title, and atleast 2 options in the format 'title option1 option2' and an optional 'multi' flag after the title`);
+            } else {
+                client.say(target, makePoll(title, command, multi));
+            }
             break;
         case '!song':
             getSong();
-            readwrite(null, 'song.txt');
+            let song = readwrite(null, 'song.txt');
+            // ignore filepath start, filenames are orignally in format "artist_song_name" 
+            song = song.substring(`file /home/miekki/music/`.length, song.length - 1).replace(/_/g,' ');
             client.say(target, `Currently playing: ${song}`);
             break;
     }
@@ -84,7 +106,7 @@ function getSong() {
 function updateChannel(property, value) {
     const url = `https://api.twitch.tv/v5/channels/${userInfo._id}`;
     const headers = ['Client-ID',opts.identity.client_id, 'Accept', 'application/vnd.twitchtv.v5+json',
-                    'Authorization', `OAuth ${oauth}`, 'Content-Type', 'application/json;charset=utf-8'];
+                     'Authorization', `OAuth ${oauth}`, 'Content-Type', 'application/json;charset=utf-8'];
     const jsonString = `{"channel": {"${property}": "${value}"}}`;
     useApi('PUT', url, false, headers, jsonString);
 }
@@ -98,13 +120,7 @@ function readwrite(message, file = null) {
         });
     } else {
         var data = fs.readFileSync(file,{ encoding: 'utf8'});
-        if (file == 'oauth.txt') {
-            // set ouath and ignore EOF char                // couldn't get variable assigning
-            oauth = data.substring(0, data.length - 1);     // to work outside this scope 
-        } else if (file == 'song.txt'){                     // even with callbacks
-            // ignore filepath start
-            song = data.substring(`file /home/miekki/music/`.length, data.length - 1);
-        }
+        return data;
     }
 }
 
@@ -122,12 +138,15 @@ function executedCommand(command, context) {
     } else if (broadcasterCommands.includes(command) && context.badges.broadcaster == 1) {
         console.log(`* Executed broadcaster-only command ${command}`);
         return command;
+    } else if (modCommnads.includes(commands) && ((context.mod == true)  || (context.badges.broadcaster == 1))) {
+        console.log(`* Executed moderator-only command ${command}`);
+        return command;
     }
     else if (command.charAt(0) == '!') readwrite(`* Tried to execute unknow command ${command}`); // possibly wanted commands
 }
 
-function rollDice() {
-    return Math.floor(Math.random() * 6) + 1;
+function random(range) {
+    return Math.floor(Math.random() * range);
 }
 
 function getUptime() {
@@ -136,19 +155,26 @@ function getUptime() {
 }
 
 function makePoll(title, choices, multi) {
-    let jsonString = JSON.stringify({ 'title': title, 'options': choices , 'multi': multi});
+    let jsonString = JSON.stringify({ poll: { question: title, answers: choices, priv: true, co: false, // priv = can poll only be found with url. co = commenting enabled
+                                              ma: multi, mip: false, enter_name: false,                 // ma = multiple selections per answer allowed. mip = multiple votes per ip.
+                                              has_deadline: false, only_reg: false, vpn: true }});      // vpn = can users with vpn vote
 
     headers = ['Content-Type' ,'application/json'];
-    pollData = useApi('PUT', 'https://strawpoll.me/api/v2/polls', true, headers, jsonString);
-    return `https://strawpoll.me/${pollData.id}`;
+    // response is a json string instead of an object so parse it first
+    pollData = JSON.parse(useApi('POST', 'https://api2.strawpoll.com/poll', false, headers, jsonString));
+    return `https://strawpoll.com/${pollData.poll.hash}`;
 }
 
 function useApi(method, url, async = false, additionalHeaders = [], jsonItem = null) {
     let xmlHttp = new xml.XMLHttpRequest();
     xmlHttp.open(method, url, async);
+    // used in almost every twitch api call
     xmlHttp.setRequestHeader('Client-ID',opts.identity.client_id);
     for (let i = 0; i < additionalHeaders.length; i += 2) {
         xmlHttp.setRequestHeader(additionalHeaders[i], additionalHeaders[i + 1]);
+    }
+    xmlHttp.onload = function () {
+        console.log(xmlHttp.status)
     }
     xmlHttp.send(jsonItem);
     return xmlHttp.responseText; 
@@ -156,11 +182,14 @@ function useApi(method, url, async = false, additionalHeaders = [], jsonItem = n
 
 function onConnectedHandler(addr, port) {
     console.log(`* Connected to ${addr}:${port}`);
+    // get basic information from broadcaster such as user-id 
     let url = 'https://api.twitch.tv/kraken/users?login=miekki';
     const params = ['Accept', `application/vnd.twitchtv.v5+json`];
     userJsonString = JSON.parse(useApi('GET', url, false, params));
     userInfo = userJsonString.users[0];
-    // get oauth from file
-    readwrite(null, 'oauth.txt');
+    // set ouath and ignore EOF char  
+    oauth = readwrite(null, 'oauth.txt')
+    oauth = oauth.substring(0, oauth.length - 1);
+    // bot's name color in chat
     client.color("Blue");
 }
