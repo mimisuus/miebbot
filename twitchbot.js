@@ -27,7 +27,29 @@ function onMessageHandler(target, context, msg, self) {
     if (self) { return; } // ignore all messages from the bot itself
 
     let commandComponents = msg.split(' ');
+    // all commands start with !
+    if (commandComponents[0].charAt(0) == '!') {
     switch (commands.executedCommand(commandComponents[0], context)) {
+        case '!followage':
+            // if no second argument, then check follow time for message sender
+            let userID = context['user-id'];
+            let userName = commandComponents[1];
+            if (userName != null) {
+                const follower = JSON.parse(commands.useApi('GET',`https://api.twitch.tv/helix/users?login=${userName}`));
+                if (follower != null) {
+                    // must specify first item because this endpoint can get multiple users
+                    userID = follower.data[0].id;
+                } 
+            } else {
+                userName = context['display-name'];
+            }
+            if (userID != null) {
+                followString = commands.followage(userID, userInfo._id, userName);
+                client.say(target, followString);
+            } else {
+                client.say(targe, 'Invalid username');
+            }
+            break;
         case '!random':
             const range = commandComponents[1];
             if (range == null) {
@@ -115,6 +137,7 @@ function onMessageHandler(target, context, msg, self) {
                 client.say(target, 'No data available for past polls');
             }
             break;
+    }
     }
 }
 

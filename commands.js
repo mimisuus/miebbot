@@ -1,10 +1,9 @@
 const xml = require('xmlhttprequest');
 
-const commands = ['!random', '!commands', '!uptime', '!timestamp', '!song'];
+const commands = ['!random', '!commands', '!uptime', '!timestamp', '!song', '!followage'];
 const broadcasterCommands = [ '!title', '!game', '!feed'];
 const modCommnads = ['!poll', '!pollresult'];
 let oauth;
-
 const opts = {
     identity: {
         password: 'oauth:horrol26wxispc0fr38qlv8ep3whwr',
@@ -13,6 +12,46 @@ const opts = {
 };
 
 module.exports = {
+
+    executedCommand: function(command, context) {
+        if (commands.includes(command)) {
+            console.log(`* Executed command ${command}`);
+            return command;
+        } else if (broadcasterCommands.includes(command) && context.badges.broadcaster == 1) {
+            console.log(`* Executed broadcaster-only command ${command}`);
+            return command;
+        } else if (modCommnads.includes(command) && ((context.mod == true)  || (context.badges.broadcaster == 1))) {
+            console.log(`* Executed moderator-only command ${command}`);
+            return command;
+        }
+        else module.exports.readwrite(`* Tried to execute unknow command ${command}`); // possibly wanted commands
+    },
+
+
+    readwrite: function(message, file = null) {
+        const fs = require('fs');
+        if (message != null) {
+            fs.appendFile('logs.txt', message + "\n", function(err){
+                if (err) throw err;
+                console.log('* Logs updated');
+            });
+        } else {
+            var data = fs.readFileSync(file,{ encoding: 'utf8'});
+            return data;
+        }
+    },
+
+    followage: function(userID, channelID, userName) {
+        let url = `https://api.twitch.tv/helix/users/follows?from_id=${userID}&to_id=${channelID}`;
+        const user = JSON.parse(module.exports.useApi('GET', url));
+        if (user.data[0] != null) {
+            const followDate = user.data[0].followed_at;
+            const time = module.exports.msToYearsAndDays(Date.now() - Date.parse(followDate));
+            return `${userName} has been following for ${time}`;
+        } else {
+            return `${userName} isn't following this channel`;
+        }
+    },
 
     getSong: function() {
         const execSync = require('child_process').execSync;
@@ -32,42 +71,26 @@ module.exports = {
         module.exports.useApi('PUT', url, false, headers, jsonString);
     },
 
-    readwrite: function(message, file = null) {
-        const fs = require('fs');
-        if (message != null) {
-            fs.appendFile('logs.txt', message + "\n", function(err){
-                if (err) throw err;
-                console.log('* Logs updated');
-            });
-        } else {
-            var data = fs.readFileSync(file,{ encoding: 'utf8'});
-            return data;
-        }
-    },
-
     getCommands: function() {
         return `Commands for regular users: ${commands.join(', ')}`;
     },
 
-    msToTimestamp: function(milliseconds) {
-        const uptimeHours = Math.floor(milliseconds / (1000 * 60 * 60));
-        const uptimeMinutes = Math.floor((milliseconds % (1000 * 60 * 60)) / (1000 * 60));
-        const uptimeSeconds = Math.floor((milliseconds % (1000 * 60) )/ (1000));
-        return `${uptimeHours}h${uptimeMinutes}m${uptimeSeconds}s`
+    msToYearsAndDays: function(milliseconds) {
+        const dayMs = 1000 * 60 * 60 * 24;
+        const yearMs = dayMs * 365;
+        const timeYears = Math.floor(milliseconds / yearMs);
+        const timeDays = Math.floor((milliseconds % yearMs) / dayMs);
+        return (timeYears > 0) ? `${timeYears} years and ${timeDays} days.` : `${timeDays} days.`;
     },
 
-    executedCommand: function(command, context) {
-        if (commands.includes(command)) {
-            console.log(`* Executed command ${command}`);
-            return command;
-        } else if (broadcasterCommands.includes(command) && context.badges.broadcaster == 1) {
-            console.log(`* Executed broadcaster-only command ${command}`);
-            return command;
-        } else if (modCommnads.includes(command) && ((context.mod == true)  || (context.badges.broadcaster == 1))) {
-            console.log(`* Executed moderator-only command ${command}`);
-            return command;
-        }
-        else if (command.charAt(0) == '!') module.exports.readwrite(`* Tried to execute unknow command ${command}`); // possibly wanted commands
+    msToTimestamp: function(milliseconds) {
+        const msSeconds = 1000;
+        const msMinutes = msSeconds * 60;
+        const msHours = msMinutes * 60;
+        const uptimeHours = Math.floor(milliseconds / msHours);
+        const uptimeMinutes = Math.floor((milliseconds % msHours) / msMinutes);
+        const uptimeSeconds = Math.floor((milliseconds % msMinutes ) / msSeconds);
+        return `${uptimeHours}h${uptimeMinutes}m${uptimeSeconds}s`
     },
 
     random: function(range) {
